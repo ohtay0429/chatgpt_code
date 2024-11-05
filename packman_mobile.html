@@ -161,6 +161,11 @@
     }
 
     function update() {
+      // Update mouth animation for Pac-Man
+      pacman.frameCounter++;
+      if (pacman.frameCounter % 10 === 0) {
+        pacman.mouthOpen = !pacman.mouthOpen;
+      }
       if (!pacman.visible) {
         pacman.blinkCounter++;
         if (pacman.blinkCounter > 60) {
