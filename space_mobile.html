@@ -15,32 +15,10 @@
       margin: auto;
       background: black;
     }
-    #controls {
-      display: flex;
-      justify-content: center;
-      margin-top: 10px;
-    }
-    .button {
-      background-color: #333;
-      color: white;
-      padding: 15px;
-      margin: 5px;
-      border: none;
-      border-radius: 5px;
-      font-size: 16px;
-    }
-    .button:active {
-      background-color: #555;
-    }
   </style>
 </head>
 <body>
   <canvas id="gameCanvas" width="480" height="320"></canvas>
-  <div id="controls">
-    <button class="button" id="leftButton">Left</button>
-    <button class="button" id="shootButton">Shoot</button>
-    <button class="button" id="rightButton">Right</button>
-  </div>
   <script>
     const canvas = document.getElementById('gameCanvas');
     const ctx = canvas.getContext('2d');
@@ -52,6 +30,7 @@
     const playerSpeed = 7;
     let playerHit = false;
     let playerHitCount = 0;
+    let shootingInterval;
 
     // 敵の設定
     const enemyWidth = 30;
@@ -70,37 +49,47 @@
     let enemyShots = [];
     const enemyShotSpeed = 3;
 
-    // キー入力の管理
-    let rightPressed = false;
-    let leftPressed = false;
+    // タッチイベントの管理
+    let touchStartX = null;
+    let isShooting = false;
 
-    document.addEventListener("keydown", keyDownHandler);
-    document.addEventListener("keyup", keyUpHandler);
+    canvas.addEventListener('touchstart', handleTouchStart);
+    canvas.addEventListener('touchmove', handleTouchMove);
+    canvas.addEventListener('touchend', handleTouchEnd);
 
-    // タッチ対応のボタンイベント
-    document.getElementById('leftButton').addEventListener('touchstart', () => { leftPressed = true; });
-    document.getElementById('leftButton').addEventListener('touchend', () => { leftPressed = false; });
-    document.getElementById('rightButton').addEventListener('touchstart', () => { rightPressed = true; });
-    document.getElementById('rightButton').addEventListener('touchend', () => { rightPressed = false; });
-    document.getElementById('shootButton').addEventListener('touchstart', () => { 
-      shots.push({ x: playerX + playerWidth / 2, y: canvas.height - playerHeight - 10 });
-    });
+    function handleTouchStart(e) {
+      touchStartX = e.touches[0].clientX;
+      startShooting();
+    }
 
-    function keyDownHandler(e) {
-      if (e.key === "Right" || e.key === "ArrowRight") {
-        rightPressed = true;
-      } else if (e.key === "Left" || e.key === "ArrowLeft") {
-        leftPressed = true;
-      } else if (e.key === " " || e.key === "Spacebar") {
-        shots.push({ x: playerX + playerWidth / 2, y: canvas.height - playerHeight - 10 });
+    function handleTouchMove(e) {
+      if (touchStartX !== null) {
+        const touchCurrentX = e.touches[0].clientX;
+        const deltaX = touchCurrentX - touchStartX;
+        playerX += deltaX * 0.1;
+        playerX = Math.max(0, Math.min(canvas.width - playerWidth, playerX));
+        touchStartX = touchCurrentX;
       }
     }
 
-    function keyUpHandler(e) {
-      if (e.key === "Right" || e.key === "ArrowRight") {
-        rightPressed = false;
-      } else if (e.key === "Left" || e.key === "ArrowLeft") {
-        leftPressed = false;
+    function handleTouchEnd(e) {
+      touchStartX = null;
+      stopShooting();
+    }
+
+    function startShooting() {
+      if (!isShooting) {
+        isShooting = true;
+        shootingInterval = setInterval(() => {
+          shots.push({ x: playerX + playerWidth / 2, y: canvas.height - playerHeight - 10 });
+        }, 500);
+      }
+    }
+
+    function stopShooting() {
+      if (isShooting) {
+        isShooting = false;
+        clearInterval(shootingInterval);
       }
     }
 
@@ -230,12 +219,6 @@
       drawEnemyShots();
       checkCollisions();
       updateEnemies();
-
-      if (rightPressed && playerX < canvas.width - playerWidth) {
-        playerX += playerSpeed;
-      } else if (leftPressed && playerX > 0) {
-        playerX -= playerSpeed;
-      }
 
       requestAnimationFrame(draw);
     }
