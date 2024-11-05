@@ -1,1 +1,279 @@
-<!DOCTYPE html><html><head>  <meta charset="utf-8">  <title>スペースインベーダー</title>  <style>    body {      margin: 0;      background: black;      overflow: hidden;    }    #gameCanvas {      border: 1px solid white;      display: block;      margin: auto;      background: black;    }  </style></head><body>  <canvas id="gameCanvas" width="480" height="320"></canvas>  <script>    const canvas = document.getElementById('gameCanvas');    const ctx = canvas.getContext('2d');    // プレイヤーの設定    const playerWidth = 30;    const playerHeight = 15;    let playerX = (canvas.width - playerWidth) / 2;    const playerSpeed = 7;    let playerHit = false;    let playerHitCount = 0;    let shootingInterval;    // 敵の設定    const enemyWidth = 30;    const enemyHeight = 15;    let enemies = [];    const rowCount = 5; // 敵の行数を増やす    const columnCount = 10; // 敵の列数を増やす    let enemyDirection = 1; // 敵の横方向の動き（1: 右、-1: 左）    let enemySpeed = 1;    // ショットの設定    let shots = [];    const shotSpeed = 5;    // 敵のショットの設定    let enemyShots = [];    const enemyShotSpeed = 3;    // タッチイベントの管理    let touchStartX = null;    let isShooting = false;    // キーボード入力の管理    let rightPressed = false;    let leftPressed = false;    document.addEventListener("keydown", keyDownHandler);    document.addEventListener("keyup", keyUpHandler);    canvas.addEventListener('touchstart', handleTouchStart);    canvas.addEventListener('touchmove', handleTouchMove);    canvas.addEventListener('touchend', handleTouchEnd);    function keyDownHandler(e) {      if (e.key === "Right" || e.key === "ArrowRight") {        rightPressed = true;        startShooting();      } else if (e.key === "Left" || e.key === "ArrowLeft") {        leftPressed = true;        startShooting();      } else if (e.key === " " || e.key === "Spacebar") {        shots.push({ x: playerX + playerWidth / 2, y: canvas.height - playerHeight - 10 });      }    }    function keyUpHandler(e) {      if (e.key === "Right" || e.key === "ArrowRight") {        rightPressed = false;        stopShooting();      } else if (e.key === "Left" || e.key === "ArrowLeft") {        leftPressed = false;        stopShooting();      }    }    function handleTouchStart(e) {      touchStartX = e.touches[0].clientX;      startShooting();    }    function handleTouchMove(e) {      if (touchStartX !== null) {        const touchCurrentX = e.touches[0].clientX;        const deltaX = touchCurrentX - touchStartX;        playerX += deltaX * 0.1;        playerX = Math.max(0, Math.min(canvas.width - playerWidth, playerX));        touchStartX = touchCurrentX;      }    }    function handleTouchEnd(e) {      touchStartX = null;      stopShooting();    }    function startShooting() {      if (!isShooting) {        isShooting = true;        shootingInterval = setInterval(() => {          shots.push({ x: playerX + playerWidth / 2, y: canvas.height - playerHeight - 10 });        }, 500);      }    }    function stopShooting() {      if (isShooting) {        isShooting = false;        clearInterval(shootingInterval);      }    }    function drawPlayer() {      if (playerHit) {        if (playerHitCount % 20 < 10) {          ctx.fillStyle = "#00FF00";        } else {          ctx.fillStyle = "#000000";        }        playerHitCount++;        if (playerHitCount > 60) {          playerHit = false;          playerHitCount = 0;          playerX = (canvas.width - playerWidth) / 2;          enemyShots = [];          initEnemies();        }      } else {        ctx.fillStyle = "#00FF00";      }      ctx.beginPath();      ctx.rect(playerX, canvas.height - playerHeight, playerWidth, playerHeight);      ctx.fill();      ctx.closePath();    }    function drawEnemies() {      enemies.forEach((enemy) => {        ctx.beginPath();        ctx.rect(enemy.x, enemy.y, enemyWidth, enemyHeight);        ctx.fillStyle = "#FF0000";        ctx.fill();        ctx.closePath();      });    }    function drawShots() {      shots.forEach((shot, index) => {        ctx.beginPath();        ctx.rect(shot.x - 2, shot.y, 4, 10);        ctx.fillStyle = "#FFFFFF";        ctx.fill();        ctx.closePath();        shot.y -= shotSpeed;        if (shot.y < 0) {          shots.splice(index, 1);        }      });    }    function drawEnemyShots() {      enemyShots.forEach((shot, index) => {        ctx.beginPath();        ctx.rect(shot.x - 2, shot.y, 4, 10);        ctx.fillStyle = "#FFFF00";        ctx.fill();        ctx.closePath();        shot.y += enemyShotSpeed;        if (shot.y > canvas.height) {          enemyShots.splice(index, 1);        }      });    }    function updateEnemies() {      let edgeReached = false;      enemies.forEach((enemy) => {        enemy.x += enemyDirection * enemySpeed;        if (enemy.x + enemyWidth > canvas.width || enemy.x < 0) {          edgeReached = true;        }      });      if (edgeReached) {        enemyDirection *= -1;        enemies.forEach((enemy) => {          enemy.y += enemyHeight; // 敵を下に移動させる        });      }      // 敵のビーム発射      if (Math.random() < 0.3) { // 発射確率をさらに増加        const randomEnemy = enemies[Math.floor(Math.random() * enemies.length)];        if (randomEnemy) {          enemyShots.push({ x: randomEnemy.x + enemyWidth / 2, y: randomEnemy.y + enemyHeight });        }      }    }    function checkCollisions() {      shots.forEach((shot, shotIndex) => {        enemies.forEach((enemy, enemyIndex) => {          if (            shot.x > enemy.x &&            shot.x < enemy.x + enemyWidth &&            shot.y > enemy.y &&            shot.y < enemy.y + enemyHeight          ) {            enemies.splice(enemyIndex, 1);            shots.splice(shotIndex, 1);          }        });      });      enemyShots.forEach((shot, shotIndex) => {        if (          shot.x > playerX &&          shot.x < playerX + playerWidth &&          shot.y > canvas.height - playerHeight &&          shot.y < canvas.height        ) {          // プレイヤーに当たった場合          playerHit = true;          enemyShots.splice(shotIndex, 1);        }      });    }    function draw() {      ctx.clearRect(0, 0, canvas.width, canvas.height);      drawPlayer();      drawEnemies();      drawShots();      drawEnemyShots();      checkCollisions();      updateEnemies();      if (rightPressed && playerX < canvas.width - playerWidth) {        playerX += playerSpeed;      } else if (leftPressed && playerX > 0) {        playerX -= playerSpeed;      }      requestAnimationFrame(draw);    }    function initEnemies() {      enemies = [];      for (let i = 0; i < rowCount; i++) {        for (let j = 0; j < columnCount; j++) {          enemies.push({ x: j * (enemyWidth + 10) + 10, y: i * (enemyHeight + 10) + 10 });        }      }    }    initEnemies();    draw();  </script></body></html>
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>スペースインベーダー</title>
+  <style>
+    body {
+      margin: 0;
+      background: black;
+      overflow: hidden;
+    }
+    #gameCanvas {
+      border: 1px solid white;
+      display: block;
+      margin: auto;
+      background: black;
+      width: 100vw;
+      height: 100vh;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="gameCanvas"></canvas>
+  <script>
+    const canvas = document.getElementById('gameCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // サイズをデバイスの幅と高さにフィットさせる
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    // プレイヤーの設定
+    const playerWidth = 60;
+    const playerHeight = 30;
+    let playerX = (canvas.width - playerWidth) / 2;
+    const playerSpeed = 7;
+    let playerHit = false;
+    let playerHitCount = 0;
+    let shootingInterval;
+
+    // 敵の設定
+    const enemyWidth = 50;
+    const enemyHeight = 30;
+    let enemies = [];
+    const rowCount = 5; // 敵の行数を増やす
+    const columnCount = 10; // 敵の列数を増やす
+    let enemyDirection = 1; // 敵の横方向の動き（1: 右、-1: 左）
+    let enemySpeed = 1;
+
+    // ショットの設定
+    let shots = [];
+    const shotSpeed = 10;
+
+    // 敵のショットの設定
+    let enemyShots = [];
+    const enemyShotSpeed = 5;
+
+    // タッチイベントの管理
+    let touchStartX = null;
+    let isShooting = false;
+
+    // キーボード入力の管理
+    let rightPressed = false;
+    let leftPressed = false;
+
+    document.addEventListener("keydown", keyDownHandler);
+    document.addEventListener("keyup", keyUpHandler);
+    document.addEventListener('touchstart', handleTouchStart);
+    document.addEventListener('touchmove', handleTouchMove);
+    document.addEventListener('touchend', handleTouchEnd);
+
+    function keyDownHandler(e) {
+      if (e.key === "Right" || e.key === "ArrowRight") {
+        rightPressed = true;
+        startShooting();
+      } else if (e.key === "Left" || e.key === "ArrowLeft") {
+        leftPressed = true;
+        startShooting();
+      } else if (e.key === " " || e.key === "Spacebar") {
+        shots.push({ x: playerX + playerWidth / 2, y: canvas.height - playerHeight - 10 });
+      }
+    }
+
+    function keyUpHandler(e) {
+      if (e.key === "Right" || e.key === "ArrowRight") {
+        rightPressed = false;
+        stopShooting();
+      } else if (e.key === "Left" || e.key === "ArrowLeft") {
+        leftPressed = false;
+        stopShooting();
+      }
+    }
+
+    function handleTouchStart(e) {
+      touchStartX = e.touches[0].clientX;
+      startShooting();
+    }
+
+    function handleTouchMove(e) {
+      if (touchStartX !== null) {
+        const touchCurrentX = e.touches[0].clientX;
+        const deltaX = touchCurrentX - touchStartX;
+        playerX += deltaX * 0.5; // 移動量を増やす
+        playerX = Math.max(0, Math.min(canvas.width - playerWidth, playerX));
+        touchStartX = touchCurrentX;
+      }
+    }
+
+    function handleTouchEnd(e) {
+      touchStartX = null;
+      stopShooting();
+    }
+
+    function startShooting() {
+      if (!isShooting) {
+        isShooting = true;
+        shootingInterval = setInterval(() => {
+          shots.push({ x: playerX + playerWidth / 2, y: canvas.height - playerHeight - 10 });
+        }, 300);
+      }
+    }
+
+    function stopShooting() {
+      if (isShooting) {
+        isShooting = false;
+        clearInterval(shootingInterval);
+      }
+    }
+
+    function drawPlayer() {
+      if (playerHit) {
+        if (playerHitCount % 20 < 10) {
+          ctx.fillStyle = "#00FF00";
+        } else {
+          ctx.fillStyle = "#000000";
+        }
+        playerHitCount++;
+        if (playerHitCount > 60) {
+          playerHit = false;
+          playerHitCount = 0;
+          playerX = (canvas.width - playerWidth) / 2;
+          enemyShots = [];
+          initEnemies();
+        }
+      } else {
+        ctx.fillStyle = "#00FF00";
+      }
+      ctx.beginPath();
+      ctx.rect(playerX, canvas.height - playerHeight, playerWidth, playerHeight);
+      ctx.fill();
+      ctx.closePath();
+    }
+
+    function drawEnemies() {
+      enemies.forEach((enemy) => {
+        ctx.beginPath();
+        ctx.rect(enemy.x, enemy.y, enemyWidth, enemyHeight);
+        ctx.fillStyle = "#FF0000";
+        ctx.fill();
+        ctx.closePath();
+      });
+    }
+
+    function drawShots() {
+      shots.forEach((shot, index) => {
+        ctx.beginPath();
+        ctx.rect(shot.x - 2, shot.y, 4, 10);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fill();
+        ctx.closePath();
+        shot.y -= shotSpeed;
+
+        if (shot.y < 0) {
+          shots.splice(index, 1);
+        }
+      });
+    }
+
+    function drawEnemyShots() {
+      enemyShots.forEach((shot, index) => {
+        ctx.beginPath();
+        ctx.rect(shot.x - 2, shot.y, 4, 10);
+        ctx.fillStyle = "#FFFF00";
+        ctx.fill();
+        ctx.closePath();
+        shot.y += enemyShotSpeed;
+
+        if (shot.y > canvas.height) {
+          enemyShots.splice(index, 1);
+        }
+      });
+    }
+
+    function updateEnemies() {
+      let edgeReached = false;
+      enemies.forEach((enemy) => {
+        enemy.x += enemyDirection * enemySpeed;
+        if (enemy.x + enemyWidth > canvas.width || enemy.x < 0) {
+          edgeReached = true;
+        }
+      });
+
+      if (edgeReached) {
+        enemyDirection *= -1;
+        enemies.forEach((enemy) => {
+          enemy.y += enemyHeight; // 敵を下に移動させる
+        });
+      }
+
+      // 敵のビーム発射
+      if (Math.random() < 0.3) { // 発射確率をさらに増加
+        const randomEnemy = enemies[Math.floor(Math.random() * enemies.length)];
+        if (randomEnemy) {
+          enemyShots.push({ x: randomEnemy.x + enemyWidth / 2, y: randomEnemy.y + enemyHeight });
+        }
+      }
+    }
+
+    function checkCollisions() {
+      shots.forEach((shot, shotIndex) => {
+        enemies.forEach((enemy, enemyIndex) => {
+          if (
+            shot.x > enemy.x &&
+            shot.x < enemy.x + enemyWidth &&
+            shot.y > enemy.y &&
+            shot.y < enemy.y + enemyHeight
+          ) {
+            enemies.splice(enemyIndex, 1);
+            shots.splice(shotIndex, 1);
+          }
+        });
+      });
+
+      enemyShots.forEach((shot, shotIndex) => {
+        if (
+          shot.x > playerX &&
+          shot.x < playerX + playerWidth &&
+          shot.y > canvas.height - playerHeight &&
+          shot.y < canvas.height
+        ) {
+          // プレイヤーに当たった場合
+          playerHit = true;
+          enemyShots.splice(shotIndex, 1);
+        }
+      });
+    }
+
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      drawPlayer();
+      drawEnemies();
+      drawShots();
+      drawEnemyShots();
+      checkCollisions();
+      updateEnemies();
+
+      if (rightPressed && playerX < canvas.width - playerWidth) {
+        playerX += playerSpeed;
+      } else if (leftPressed && playerX > 0) {
+        playerX -= playerSpeed;
+      }
+
+      requestAnimationFrame(draw);
+    }
+
+    function initEnemies() {
+      enemies = [];
+      for (let i = 0; i < rowCount; i++) {
+        for (let j = 0; j < columnCount; j++) {
+          enemies.push({ x: j * (enemyWidth + 10) + 10, y: i * (enemyHeight + 10) + 10 });
+        }
+      }
+    }
+
+    initEnemies();
+    draw();
+  </script>
+</body>
+</html>
