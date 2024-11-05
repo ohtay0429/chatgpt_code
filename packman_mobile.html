@@ -13,6 +13,7 @@
       align-items: center;
       height: 100vh;
       margin: 0;
+      overflow: hidden; /* Prevent scrolling */
     }
     canvas {
       border: 2px solid white;
@@ -174,6 +175,35 @@
       if (!checkCollision(nextX, nextY)) {
         pacman.x = nextX;
         pacman.y = nextY;
+
+        // Check pellet collision
+        pellets = pellets.filter(pellet => {
+          if (!(pacman.x < pellet.x + tileSize &&
+                pacman.x + pacman.size > pellet.x &&
+                pacman.y < pellet.y + tileSize &&
+                pacman.y + pacman.size > pellet.y)) {
+            return true;
+          }
+          return false;
+        });
+
+        // Check power pellet collision
+        powerPellets = powerPellets.filter(pellet => {
+          if (!(pacman.x < pellet.x + tileSize &&
+                pacman.x + pacman.size > pellet.x &&
+                pacman.y < pellet.y + tileSize &&
+                pacman.y + pacman.size > pellet.y)) {
+            return true;
+          }
+          pacman.poweredUp = true;
+          pacman.powerUpTimer = 600; // 10 seconds at 60fps
+          ghosts.forEach(ghost => {
+            ghost.color = 'blue';
+            ghost.dx /= 4;
+            ghost.dy /= 4;
+          });
+          return false;
+        });
       } else {
         pacman.moving = false;
         pacman.dx = 0;
@@ -197,6 +227,23 @@
         } else {
           ghost.x = nextGhostX;
           ghost.y = nextGhostY;
+        }
+
+        // Check ghost collision
+        if (
+          pacman.x < ghost.x + tileSize &&
+          pacman.x + pacman.size > ghost.x &&
+          pacman.y < ghost.y + tileSize &&
+          pacman.y + pacman.size > ghost.y
+        ) {
+          if (pacman.poweredUp) {
+            ghost.x = ghost.originalX;
+            ghost.y = ghost.originalY;
+            ghost.color = ghost.originalColor;
+          } else {
+            pacman.visible = false;
+            pacman.blinkCounter = 0;
+          }
         }
       });
     }
