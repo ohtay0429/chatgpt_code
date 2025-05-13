@@ -62,7 +62,33 @@ let map,pacman,ghosts,score,pellets,frightEnd=0,clearStart=0,gameState='playing'
 function init(){map=generateMaze();carve(map,12,13,5,3);map[23][14]=2;pacman=new Pacman(14,23);ensureConnectivity(map,pacman.col,pacman.row);ghosts=[];[[13,14],[14,14],[13,15],[14,15]].forEach((p,i)=>ghosts.push(new Ghost(p[0],p[1],COLORS[i])));score=0;pellets=map.flat().filter(v=>v===2||v===3).length;frightEnd=0;gameState='playing';}
 /* Input */
 addEventListener('keydown',e=>{if(gameState==='playing'||gameState==='fright'){if(e.key==='ArrowLeft')pacman.nextDir=DIR.LEFT;else if(e.key==='ArrowUp')pacman.nextDir=DIR.UP;else if(e.key==='ArrowRight')pacman.nextDir=DIR.RIGHT;else if(e.key==='ArrowDown')pacman.nextDir=DIR.DOWN;}});
-let sx=0,sy=0;canvas.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;});canvas.addEventListener('touchend',e=>{if(gameState!=='playing'&&gameState!=='fright')return;const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;pacman.nextDir=Math.abs(dx)>Math.abs(dy)?(dx>0?DIR.RIGHT:DIR.LEFT):(dy>0?DIR.DOWN:DIR.UP);});
+let sx=0,sy=0;canvas.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;});
+  canvas.addEventListener('touchend',e=>{if(gameState!=='playing'&&gameState!=='fright')return;const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;pacman.nextDir=Math.abs(dx)>Math.abs(dy)?(dx>0?DIR.RIGHT:DIR.LEFT):(dy>0?DIR.DOWN:DIR.UP);});
+    // ── デバッグ用隠しボタンを追加 ──
+    (function addDebugButton(){
+      const debugBtn = document.createElement('button');
+      debugBtn.id    = 'debugBtn';
+      debugBtn.innerText = 'Debug';
+
+      // モバイル右下に透明ボタンを配置
+      debugBtn.style.position   = 'absolute';
+      debugBtn.style.bottom     = '10px';     // 下から10px
+      debugBtn.style.right      = '10px';     // 右から10px
+      debugBtn.style.width      = '40px';     // タップしやすい大きさ
+      debugBtn.style.height     = '40px';     // 同上
+      debugBtn.style.background = 'transparent';
+      debugBtn.style.border     = 'none';
+      debugBtn.style.opacity    = '0';        // 完全に透明
+      debugBtn.style.zIndex     = '9999';     // canvasの上に来るように
+
+      document.body.appendChild(debugBtn);
+
+      // クリックで「残りペレット＝1」にする
+      debugBtn.addEventListener('click', () => {
+        pellets = 1;
+      });
+    })();
+  
 /* Loop */
 function update(){if(gameState==='dying'){if(Date.now()-pacman.deathStart>DEATH_MS){init();}return;}if(gameState==='stageclear'){if(Date.now()-clearStart>CLEAR_MS){init();}return;}
  pacman.update();ghosts.forEach(g=>g.update());const cell=map[pacman.row][pacman.col];if(cell===2||cell===3){map[pacman.row][pacman.col]=0;pellets--;score+=cell===2?10:50;if(cell===3){frightEnd=Date.now()+FRIGHT_MS;gameState='fright';ghosts.forEach(g=>g.frightened());}if(pellets===0){gameState='stageclear';clearStart=Date.now();return;}}
