@@ -76,9 +76,13 @@ let sx=0,sy=0;canvas.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;s
       debugBtn.style.right      = '10px';     // 右から10px
       debugBtn.style.width      = '40px';     // タップしやすい大きさ
       debugBtn.style.height     = '40px';     // 同上
-      debugBtn.style.background = 'transparent';
-      debugBtn.style.border     = 'none';
-      debugBtn.style.opacity    = '0';        // 完全に透明
+      //debugBtn.style.background = 'transparent';
+      //debugBtn.style.border     = 'none';
+      //debugBtn.style.opacity    = '0';        // 完全に透明
+      debugBtn.style.opacity    = '0.3';               // 半透明で見えるように
+      debugBtn.style.border     = '2px solid red';     // 赤い枠線
+      debugBtn.style.background = 'rgba(255,0,0,0.2)';  // 薄赤の背景
+      
       debugBtn.style.zIndex     = '9999';     // canvasの上に来るように
 
       document.body.appendChild(debugBtn);
