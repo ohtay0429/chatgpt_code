@@ -65,6 +65,7 @@ addEventListener('keydown',e=>{if(gameState==='playing'||gameState==='fright'){i
 let sx=0,sy=0;canvas.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;});
   canvas.addEventListener('touchend',e=>{if(gameState!=='playing'&&gameState!=='fright')return;const dx=e.changedTouches[0].clientX-sx,dy=e.changedTouches[0].clientY-sy;pacman.nextDir=Math.abs(dx)>Math.abs(dy)?(dx>0?DIR.RIGHT:DIR.LEFT):(dy>0?DIR.DOWN:DIR.UP);});
     // ── デバッグ用隠しボタンを追加 ──
+    /*
     (function addDebugButton(){
       const debugBtn = document.createElement('button');
       debugBtn.id    = 'debugBtn';
@@ -117,7 +118,7 @@ let sx=0,sy=0;canvas.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;s
       pellets = 1;
     });
   })();
-  
+  */
 /* Loop */
 function update(){if(gameState==='dying'){if(Date.now()-pacman.deathStart>DEATH_MS){init();}return;}if(gameState==='stageclear'){if(Date.now()-clearStart>CLEAR_MS){init();}return;}
  pacman.update();ghosts.forEach(g=>g.update());const cell=map[pacman.row][pacman.col];if(cell===2||cell===3){map[pacman.row][pacman.col]=0;pellets--;score+=cell===2?10:50;if(cell===3){frightEnd=Date.now()+FRIGHT_MS;gameState='fright';ghosts.forEach(g=>g.frightened());}if(pellets===0){gameState='stageclear';clearStart=Date.now();return;}}
