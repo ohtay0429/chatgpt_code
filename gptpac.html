@@ -87,11 +87,36 @@ let sx=0,sy=0;canvas.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;s
 
       document.body.appendChild(debugBtn);
 
-      // クリックで「残りペレット＝1」にする
-      debugBtn.addEventListener('click', () => {
-        pellets = 1;
+    debugBtn.addEventListener('click', () => {
+      // 1) マップ上の全ペレット情報を収集
+      const pelletList = [];
+      map.forEach((rowArr, r) =>
+        rowArr.forEach((v, c) => {
+          if (v === 2 || v === 3) pelletList.push({ c, r, type: v });
+        })
+      );
+      if (pelletList.length <= 1) return;  // すでに1つ以下なら何もしない
+
+      // 2) 残すペレットを選択（ここではPac-Manから最も近いもの）
+      const keep = pelletList.reduce((best, p) => {
+        const d1 = Math.abs(p.c - pacman.col) + Math.abs(p.r - pacman.row);
+        const d2 = Math.abs(best.c - pacman.col) + Math.abs(best.r - pacman.row);
+        return d1 < d2 ? p : best;
+      }, pelletList[0]);
+
+      // 3) それ以外のペレットを消去し、score と pellets を更新
+      pelletList.forEach(p => {
+        if (p.c === keep.c && p.r === keep.r) return;
+        map[p.r][p.c] = 0;
+        // スコア加算
+        if (p.type === 2) score += 10;
+        if (p.type === 3) score += 50;
       });
-    })();
+
+      // 4) 残りカウントを1に
+      pellets = 1;
+    });
+  })();
   
 /* Loop */
 function update(){if(gameState==='dying'){if(Date.now()-pacman.deathStart>DEATH_MS){init();}return;}if(gameState==='stageclear'){if(Date.now()-clearStart>CLEAR_MS){init();}return;}
