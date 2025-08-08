@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>FPS パックマン（ランダム迷路改・UI表示切替）</title>
+<style>
+  html,body{margin:0;height:100%;background:#111;overflow:hidden}
+  #hud{position:fixed;top:8px;left:8px;color:#ff0;font:16px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;z-index:30;
+       background:#0006;padding:6px 8px;border-radius:8px}
+  #joy{position:fixed;left:20px;bottom:20px;width:110px;height:110px;border-radius:50%;background:#0006;z-index:10;touch-action:none}
+  #knob{position:absolute;left:40px;top:40px;width:30px;height:30px;border-radius:50%;background:#ff0a}
+  #hint{position:fixed;right:10px;bottom:10px;color:#ccc;font:13px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;z-index:10;background:#0006;padding:6px 8px;border-radius:8px}
+  #minimap{position:fixed;top:8px;right:8px;width:220px;height:220px;background:#0008;border:1px solid #333;border-radius:8px;z-index:20;padding:10px;box-sizing:border-box}
+  #minimap canvas{display:block;width:200px;height:200px}
+  #overlay{position:fixed;inset:0;display:none;align-items:center;justify-content:center;background:rgba(0,0,0,.7);color:#fff;z-index:50;flex-direction:column;font:20px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  #overlay button{margin-top:12px;padding:8px 14px;border:1px solid #888;background:#111;color:#fff;border-radius:8px;cursor:pointer}
+  #ui{position:fixed;top:46px;left:50%;transform:translateX(-50%);z-index:25;background:#0006;color:#fff;border:1px solid #333;border-radius:10px;padding:8px 12px;font:14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:flex;gap:14px;align-items:center}
+  #ui label{display:flex;align-items:center;gap:6px}
+  #ui input[type=range]{width:120px}
+  #mutebtn{cursor:pointer;padding:4px 8px;border:1px solid #555;border-radius:8px;background:#111;color:#fff}
+  #gear{position:fixed;top:8px;left:50%;transform:translateX(-50%);z-index:26;background:#000a;color:#fff;border:1px solid #444;border-radius:999px;padding:4px 10px;cursor:pointer;font:14px/1 "Segoe UI",sans-serif}
+</style>
+</head>
+<body>
+<div id="hud">
+  Score: <span id="score">0</span>　
+  Power: <span id="pstat">OFF</span>　
+  FPS: <span id="fps">0</span>
+</div>
+
+<button id="gear" title="FOV/感度 UI 表示切替 (T)">⚙️</button>
+<div id="ui">
+  <label>FOV <input id="fov" type="range" min="55" max="85" step="1" value="70"><span id="fovv">70</span></label>
+  <label>感度 <input id="sens" type="range" min="0.0015" max="0.0060" step="0.0001" value="0.0035"><span id="sensv">0.0035</span></label>
+  <button id="mutebtn">🔊 BGM/SE</button>
+</div>
+
+<div id="joy"><div id="knob"></div></div>
+<div id="hint">PC: マウスドラッグで視点 / WASD で移動・Rで再開・TでUI表示切替<br>Mobile: 左下で移動、画面ドラッグで視点</div>
+<div id="minimap"><canvas id="map" width="200" height="200"></canvas></div>
+<div id="overlay">
+  <div id="msg">GAME OVER</div>
+  <button id="restartBtn">R でリスタート（クリックでも可）</button>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.154.0/build/three.min.js"></script>
+<script>
+/* ========= ゲーム状態 ========= */
+let state = 'play'; // 'play' | 'gameover' | 'win'
+
+/* ========= 基本セットアップ ========= */
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x202020);
+scene.fog = new THREE.Fog(0x202020, 32, 120);
+
+const camera = new THREE.PerspectiveCamera(70, innerWidth/innerHeight, 0.1, 2000);
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.setPixelRatio(Math.min(devicePixelRatio||1, 2));
+renderer.setSize(innerWidth, innerHeight);
+document.body.appendChild(renderer.domElement);
+
+const scoreEl = document.getElementById('score');
+const pstatEl = document.getElementById('pstat');
+const fpsEl = document.getElementById('fps');
+const overlay = document.getElementById('overlay');
+const restartBtn = document.getElementById('restartBtn');
+const fovRange = document.getElementById('fov'), fovv = document.getElementById('fovv');
+const sensRange = document.getElementById('sens'), sensv = document.getElementById('sensv');
+const muteBtn = document.getElementById('mutebtn');
+const gearBtn = document.getElementById('gear');
+const uiPanel = document.getElementById('ui');
+uiPanel.style.display = 'none'; // ← 初期状態で隠す
+let score = 0;
+
+/* ========= 光・床 ========= */
+scene.add(new THREE.AmbientLight(0xffffff, 1.0));
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.35);
+dirLight.position.set(10, 20, 10);
+scene.add(dirLight);
+
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(400,400),
+  new THREE.MeshStandardMaterial({color:0xcccccc})
+);
+floor.rotation.x = -Math.PI/2;
+scene.add(floor);
+
+const gridHelper = new THREE.GridHelper(400, 200, 0x444444, 0x444444);
+gridHelper.position.y = 0.001;
+scene.add(gridHelper);
+
+/* ========= 迷路：改良ランダム生成 ========= */
+const CELL = 2;
+const H = 3;
+const N = 21;               // 奇数サイズ
+const half = (N-1)/2 * CELL;
+
+// 全壁からスタート（1=壁, 0=通路）
+const grid = Array.from({length:N},()=>Array(N).fill(1));
+function shuffle(a){ for(let i=a.length-1;i>0;i--){ const j=(Math.random()*(i+1))|0; [a[i],a[j]]=[a[j],a[i]]; } return a; }
+function carve(x,y){
+  grid[y][x]=0;
+  for(const [dx,dy] of shuffle([[1,0],[-1,0],[0,1],[0,-1]])){
+    const nx=x+2*dx, ny=y+2*dy;
+    if(ny>0&&nx>0&&ny<N-1&&nx<N-1 && grid[ny][nx]===1){
+      grid[y+dy][x+dx]=0;   // 間の壁を壊す
+      carve(nx,ny);
+    }
+  }
+}
+carve(1,1);
+// 入口/出口
+grid[N-1][1]=0;
+grid[0][N-2]=0;
+
+// ループを少しだけ作って複雑に（十字路は抑制）
+function degree(gx,gz){
+  let d=0; if(gz>0   && grid[gz-1][gx]===0) d++;
+          if(gz<N-1 && grid[gz+1][gx]===0) d++;
+          if(gx>0   && grid[gz][gx-1]===0) d++;
+          if(gx<N-1 && grid[gz][gx+1]===0) d++;
+  return d;
+}
+function sprinkleLoops(prob=0.08){
+  for(let y=1;y<N-1;y++){
+    for(let x=1;x<N-1;x++){
+      if(grid[y][x]!==1) continue;
+      const horiz = (grid[y][x-1]===0 && grid[y][x+1]===0 && grid[y-1][x]===1 && grid[y+1][x]===1);
+      const vert  = (grid[y-1][x]===0 && grid[y+1][x]===0 && grid[y][x-1]===1 && grid[y][x+1]===1);
+      if(!horiz && !vert) continue; // 通路をつなぐ壁のみ対象
+      if(Math.random()<prob){
+        // 4方向交差が生まれないよう、両側セルの次数が3未満のときだけ開ける
+        const cells = horiz ? [[x-1,y],[x+1,y]] : [[x,y-1],[x,y+1]];
+        if(degree(...cells[0])<3 && degree(...cells[1])<3){
+          grid[y][x]=0;
+        }
+      }
+    }
+  }
+}
+sprinkleLoops(0.10); // 10%くらいでループを追加
+
+const toWorld = (gx,gz)=>new THREE.Vector3(gx*CELL - half, 0, gz*CELL - half);
+const toGrid  = (x,z)=>({ gx: Math.round((x + half)/CELL), gz: Math.round((z + half)/CELL) });
+const inBounds = (gx,gz)=> gx>=0 && gx<N && gz>=0 && gz<N;
+const walkable = (gx,gz)=> inBounds(gx,gz) && grid[gz][gx]===0;
+
+/* ========= 壁テクスチャ（おしゃれ継ぎ目） ========= */
+function makeWallTexture(){
+  const c = document.createElement('canvas'); c.width = c.height = 128;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#6e92ff'; ctx.fillRect(0,0,128,128);
+  ctx.strokeStyle = '#3556a8'; ctx.lineWidth = 3; ctx.strokeRect(2.5,2.5,123,123);
+  const img = ctx.getImageData(0,0,128,128);
+  for(let i=0;i<img.data.length;i+=4){
+    const n = (Math.random()*12)|0;
+    img.data[i]-=n; img.data[i+1]-=n; img.data[i+2]-=n;
+  }
+  ctx.putImageData(img,0,0);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+  tex.anisotropy = renderer.capabilities.getMaxAnisotropy?.() || 1;
+  return tex;
+}
+const wallTex = makeWallTexture();
+
+/* ========= 壁配置 ========= */
+const wallGeo = new THREE.BoxGeometry(CELL, H, CELL);
+const wallMat = new THREE.MeshStandardMaterial({ map: wallTex, roughness: 0.9, metalness: 0.0 });
+const edgeGeo = new THREE.EdgesGeometry(wallGeo);
+const edgeMat = new THREE.LineBasicMaterial({ color: 0x1d274d });
+
+for(let z=0; z<N; z++){
+  for(let x=0; x<N; x++){
+    if(grid[z][x]===1){
+      const m = new THREE.Mesh(wallGeo, wallMat);
+      m.position.set(x*CELL - half, H/2, z*CELL - half);
+      scene.add(m);
+      const edges = new THREE.LineSegments(edgeGeo, edgeMat);
+      edges.position.copy(m.position);
+      scene.add(edges);
+    }
+  }
+}
+
+/* ========= ドット＆パワーエサ（r=0.6 / 0.8） ========= */
+const dots = [];
+const dotGeo = new THREE.SphereGeometry(0.6, 18, 18);
+const dotMat = new THREE.MeshStandardMaterial({color:0xffee55, emissive:0x4d3, emissiveIntensity:0.1});
+const pDotGeo = new THREE.SphereGeometry(0.8, 22, 22);
+const pDotMat = new THREE.MeshStandardMaterial({color:0xffaa00, emissive:0xa50, emissiveIntensity:0.25});
+
+function placeDot(gx,gz, power=false){
+  const mesh = new THREE.Mesh(power? pDotGeo : dotGeo, power? pDotMat : dotMat);
+  mesh.position.set(gx*CELL - half, power? 0.9 : 0.7, gz*CELL - half);
+  mesh.userData.power = power;
+  scene.add(mesh);
+  dots.push(mesh);
+}
+for(let z=0; z<N; z++){
+  for(let x=0; x<N; x++){
+    if(grid[z][x]===0) placeDot(x,z,false);
+  }
+}
+[[1,1],[1,N-2],[N-2,1],[N-2,N-2]].forEach(([x,z])=>{ if(grid[z][x]===0) placeDot(x,z,true); });
+
+/* ========= プレイヤー ========= */
+const startGX = 1, startGZ = N-2;
+const startPos = toWorld(startGX,startGZ);
+camera.position.set(startPos.x, 1.75, startPos.z);
+
+/* 視点操作（表示UIで感度/FOV可変 & 表示ON/OFF） */
+let yaw = 0, pitch = -0.01;
+let SENS = parseFloat(sensRange.value);
+const clamp=(v,min,max)=>Math.max(min,Math.min(max,v));
+function setCamDir(){
+  const dir = new THREE.Vector3(Math.cos(pitch)*Math.sin(yaw), Math.sin(pitch), Math.cos(pitch)*Math.cos(yaw));
+  camera.lookAt(camera.position.clone().add(dir));
+}
+setCamDir();
+sensRange.addEventListener('input', ()=>{ SENS=parseFloat(sensRange.value); sensv.textContent=SENS.toFixed(4); });
+fovRange.addEventListener('input', ()=>{ camera.fov=parseInt(fovRange.value,10); camera.updateProjectionMatrix(); fovv.textContent=fovRange.value; });
+
+let dragging=false, lx=0, ly=0;
+function onDrag(dx,dy){ yaw-=dx*SENS; pitch-=dy*SENS; pitch=clamp(pitch,-1.2,1.2); setCamDir(); }
+addEventListener('mousedown', e=>{ if(state!=='play')return; dragging=true; lx=e.clientX; ly=e.clientY;});
+addEventListener('mousemove', e=>{ if(!dragging) return; onDrag(e.clientX-lx, e.clientY-ly); lx=e.clientX; ly=e.clientY;});
+addEventListener('mouseup', ()=>{dragging=false;});
+addEventListener('touchstart', e=>{ if(state!=='play')return; if(e.touches.length){dragging=true; lx=e.touches[0].clientX; ly=e.touches[0].clientY;}},{passive:false});
+addEventListener('touchmove', e=>{ if(!dragging) return; const t=e.touches[0]; onDrag(t.clientX-lx, t.clientY-ly); lx=t.clientX; ly=t.clientY; e.preventDefault();},{passive:false});
+addEventListener('touchend', ()=>{dragging=false;});
+
+/* UI表示切替（ボタン or Tキー） */
+function toggleUI(){ uiPanel.style.display = (uiPanel.style.display==='none' ? 'flex' : 'none'); }
+gearBtn.addEventListener('click', toggleUI);
+addEventListener('keydown', (e)=>{ if(e.key.toLowerCase()==='t') toggleUI(); });
+
+/* 移動＋当たり判定 */
+const keys = {w:0,s:0,a:0,d:0};
+addEventListener('keydown', e=>{
+  const k=e.key.toLowerCase();
+  if(k==='r'){ if(state!=='play') location.reload(); return; }
+  if(state!=='play') return;
+  if(k in keys) keys[k]=1;
+});
+addEventListener('keyup',   e=>{ const k=e.key.toLowerCase(); if(k in keys) keys[k]=0; });
+
+const joy = document.getElementById('joy');
+const knob = document.getElementById('knob');
+let jx=0, jy=0;
+function setKnob(x,y){ knob.style.left=(x-15)+'px'; knob.style.top=(y-15)+'px'; }
+joy.addEventListener('touchstart', ()=>{}, {passive:false});
+joy.addEventListener('touchmove',  (e)=>{
+  if(state!=='play') return;
+  const r = joy.getBoundingClientRect(); const t=e.touches[0];
+  const cx=r.left+r.width/2, cy=r.top+r.height/2;
+  let dx=t.clientX-cx, dy=t.clientY-cy;
+  const max=45, d=Math.hypot(dx,dy);
+  if(d>max){ dx*=max/d; dy*=max/d; }
+  setKnob(cx-r.left+dx, cy-r.top+dy);
+  jx=dx/max; jy=dy/max; e.preventDefault();
+},{passive:false});
+joy.addEventListener('touchend',   ()=>{ jx=0; jy=0; setKnob(55,55); }, {passive:false});
+
+function canMoveTo(nx, nz){
+  const {gx,gz} = toGrid(nx,nz);
+  if(!inBounds(gx,gz)) return true;
+  return grid[gz][gx] === 0;
+}
+
+/* ========= パワー状態 ========= */
+let power = false;
+let powerTime = 0;
+function setPower(on){
+  power = on;
+  pstatEl.textContent = on ? 'ON' : 'OFF';
+}
+
+/* ========= 便利関数 ========= */
+function distXZ(a, b){ const dx=a.x-b.x, dz=a.z-b.z; return Math.hypot(dx,dz); }
+function bfsNearestFree(startGX,startGZ){
+  const q=[[startGX,startGZ]], seen=new Set([startGX+','+startGZ]);
+  while(q.length){
+    const [gx,gz]=q.shift();
+    if(walkable(gx,gz)) return [gx,gz];
+    for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx=gx+dx, nz=gz+dz, key=nx+','+nz;
+      if(inBounds(nx,nz)&&!seen.has(key)){ seen.add(key); q.push([nx,nz]); }
+    }
+  }
+  return [startGX,startGZ];
+}
+function bfsNextStep(fromGX,fromGZ,toGX,toGZ){
+  if(!walkable(fromGX,fromGZ)) [fromGX,fromGZ]=bfsNearestFree(fromGX,fromGZ);
+  if(!walkable(toGX,toGZ))     [toGX,toGZ]=bfsNearestFree(toGX,toGZ);
+  const prev = Array.from({length:N},()=>Array(N).fill(null));
+  const q=[[fromGX,fromGZ]];
+  prev[fromGZ][fromGX]=[-1,-1];
+  let found=false;
+  while(q.length){
+    const [gx,gz]=q.shift();
+    if(gx===toGX&&gz===toGZ){found=true;break;}
+    for(const [dx,dz] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx=gx+dx, nz=gz+dz;
+      if(walkable(nx,nz) && !prev[nz][nx]){
+        prev[nz][nx]=[gx,gz]; q.push([nx,nz]);
+      }
+    }
+  }
+  if(!found) return [fromGX,fromGZ];
+  let cx=toGX, cz=toGZ, px, pz;
+  while(true){
+    const p=prev[cz][cx];
+    if(p[0]===-1) break;
+    px=p[0]; pz=p[1];
+    if(px===fromGX && pz===fromGZ) return [cx,cz];
+    cx=px; cz=pz;
+  }
+  return [fromGX,fromGZ];
+}
+
+/* ========= ゴースト（形状そのまま／経路探索AI） ========= */
+function makeGhostMesh(color=0xff4d4d, scale=1.35){
+  const g = new THREE.Group();
+  const head = new THREE.SphereGeometry(0.5*scale, 24, 16, 0, Math.PI*2, 0, Math.PI/2);
+  const body = new THREE.CylinderGeometry(0.5*scale, 0.5*scale, 0.6*scale, 20, 1, true);
+  const skirtPts=[]; const r=0.52*scale, h=-0.3*scale;
+  for(let i=0;i<=10;i++){ const t=i/10; const y=h + Math.sin(t*Math.PI*3)*0.06*scale; skirtPts.push(new THREE.Vector2(r, y)); }
+  const skirt = new THREE.LatheGeometry(skirtPts, 24);
+  const mat = new THREE.MeshStandardMaterial({color, roughness:0.6, metalness:0.0});
+  const m1=new THREE.Mesh(head,mat), m2=new THREE.Mesh(body,mat), m3=new THREE.Mesh(skirt,mat);
+  m1.position.y=0.6*scale; m2.position.y=0.3*scale; m3.position.y=0.0; g.add(m1,m2,m3);
+  const eyeG = new THREE.SphereGeometry(0.08*scale, 12, 12);
+  const eyeM = new THREE.MeshStandardMaterial({color:0xffffff, emissive:0x111111, emissiveIntensity:0.2});
+  const pupilG = new THREE.SphereGeometry(0.04*scale, 10, 10);
+  const pupilM = new THREE.MeshStandardMaterial({color:0x000055});
+  const e1=new THREE.Mesh(eyeG,eyeM), e2=new THREE.Mesh(eyeG,eyeM);
+  const p1=new THREE.Mesh(pupilG,pupilM), p2=new THREE.Mesh(pupilG,pupilM);
+  e1.position.set(0.18*scale, 0.5*scale, 0.42*scale); p1.position.copy(e1.position).add(new THREE.Vector3(0,0,0.06*scale));
+  e2.position.set(-0.18*scale,0.5*scale, 0.42*scale); p2.position.copy(e2.position).add(new THREE.Vector3(0,0,0.06*scale));
+  g.add(e1,e2,p1,p2);
+  return g;
+}
+const ghostColors = [0xff4d4d, 0xff9ad5, 0x7ffbff, 0xffb347];
+const ghosts = [];
+const ghostSpawnCells = [[N-3,N-3],[N-4,N-3],[N-3,N-4],[N-4,N-4]];
+ghostColors.forEach((c,i)=>{
+  let [gx,gz]=ghostSpawnCells[i];
+  if(!walkable(gx,gz)) [gx,gz]=bfsNearestFree(gx,gz);
+  const mesh = makeGhostMesh(c, 1.35);
+  const p = toWorld(gx,gz);
+  mesh.position.set(p.x, 0.55, p.z);
+  mesh.userData = { baseColor:c, gx, gz, tx:gx, tz:gz, repath:0 };
+  ghosts.push(mesh); scene.add(mesh);
+});
+let ghostSpeed = 2.3;
+
+function updateGhostTargets(dt){
+  ghosts.forEach(g=>{
+    g.userData.repath -= dt;
+    const {gx,gz} = toGrid(g.position.x, g.position.z);
+    g.userData.gx=gx; g.userData.gz=gz;
+    if(g.userData.repath<=0){
+      const player = toGrid(camera.position.x, camera.position.z);
+      let tx,tz;
+      if(power){
+        const opts=[[1,0],[-1,0],[0,1],[0,-1]].map(([dx,dz])=>[gx+dx,gz+dz]).filter(([x,z])=>walkable(x,z));
+        if(opts.length){
+          opts.sort((a,b)=>{
+            const da=(a[0]-player.gx)**2+(a[1]-player.gz)**2;
+            const db=(b[0]-player.gx)**2+(b[1]-player.gz)**2;
+            return db - da;
+          });
+          [tx,tz]=opts[0];
+        }else [tx,tz]=[gx,gz];
+      }else{
+        [tx,tz]=bfsNextStep(gx,gz,player.gx,player.gz);
+      }
+      g.userData.tx=tx; g.userData.tz=tz;
+      g.userData.repath=0.3+Math.random()*0.2;
+    }
+  });
+}
+function moveGhosts(dt){
+  ghosts.forEach((g,idx)=>{
+    const {tx,tz}=g.userData;
+    const target=toWorld(tx,tz); target.y=g.position.y;
+    const dir=new THREE.Vector3().subVectors(target,g.position);
+    const d=dir.length();
+    if(d>1e-3){
+      dir.normalize();
+      const step=Math.min(d, ghostSpeed*dt);
+      const nx=g.position.x+dir.x*step, nz=g.position.z+dir.z*step;
+      if(canMoveTo(nx, g.position.z)) g.position.x=nx;
+      if(canMoveTo(g.position.x, nz)) g.position.z=nz;
+      g.lookAt(target.x, g.position.y, target.z);
+    }
+  });
+}
+
+/* ========= オーディオ（BGM/SE） ========= */
+let audioCtx=null, masterGain, muted=false;
+function ensureAudio(){
+  if(audioCtx) return;
+  audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  masterGain=audioCtx.createGain(); masterGain.gain.value=0.4; masterGain.connect(audioCtx.destination);
+  startBGM();
+}
+function startBGM(){
+  const o1=audioCtx.createOscillator(), g1=audioCtx.createGain();
+  o1.type='triangle'; o1.frequency.value=220; g1.gain.value=0.03; o1.connect(g1).connect(masterGain); o1.start();
+  const o2=audioCtx.createOscillator(), g2=audioCtx.createGain();
+  o2.type='sine'; o2.frequency.value=277.18; g2.gain.value=0.02; o2.connect(g2).connect(masterGain); o2.start();
+  const lfo=audioCtx.createOscillator(), lg=audioCtx.createGain();
+  lfo.frequency.value=0.2; lg.gain.value=0.015; lfo.connect(lg).connect(g2.gain); lfo.start();
+}
+function blip(freq=880, dur=0.06, vol=0.2){
+  if(!audioCtx) return;
+  const o=audioCtx.createOscillator(), g=audioCtx.createGain();
+  o.type='square'; o.frequency.value=freq;
+  g.gain.setValueAtTime(0, audioCtx.currentTime);
+  g.gain.linearRampToValueAtTime(vol, audioCtx.currentTime+0.005);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime+dur);
+  o.connect(g).connect(masterGain); o.start(); o.stop(audioCtx.currentTime+dur);
+}
+muteBtn.addEventListener('click', ()=>{
+  ensureAudio();
+  muted=!muted;
+  masterGain.gain.value = muted? 0 : 0.4;
+  muteBtn.textContent = muted? '🔈 MUTE' : '🔊 BGM/SE';
+});
+addEventListener('pointerdown', ensureAudio, {once:true});
+
+/* ========= ループ ========= */
+let last = performance.now();
+let fpsSm = 60;
+function loop(now){
+  const dt = Math.min(0.033, (now-last)/1000); last = now;
+  fpsSm = fpsSm*0.9 + (1/dt)*0.1; fpsEl.textContent = fpsSm.toFixed(0);
+
+  if(state==='play'){
+    // 移動
+    const baseSpeed = power ? 4.2 : 3.0;
+    let f = (keys.w-keys.s) + (-jy);
+    // A=左, D=右 の直感に合わせてキーボードだけ反転（ジョイスティック jx は現状維持）
+    const rKeys = (keys.a - keys.d);
+    let r = rKeys + jx;
+    const forward = new THREE.Vector3(Math.sin(yaw),0,Math.cos(yaw));
+    const right   = new THREE.Vector3(Math.cos(yaw),0,-Math.sin(yaw));
+    const delta = new THREE.Vector3().addScaledVector(forward, f*baseSpeed*dt).addScaledVector(right, r*baseSpeed*dt);
+    const nx = camera.position.x + delta.x;
+    const nz = camera.position.z + delta.z;
+    if(canMoveTo(nx, camera.position.z)) camera.position.x = nx;
+    if(canMoveTo(camera.position.x, nz)) camera.position.z = nz;
+
+    // ドット取得（XZ距離）
+    let remaining = 0;
+    for(let i=0;i<dots.length;i++){
+      const d = dots[i]; if(!d) continue; remaining++;
+      if(distXZ(camera.position, d.position) < 1.1){
+        scene.remove(d); dots[i]=null;
+        if(d.userData.power){
+          setPower(true); powerTime = 10 * 60; score += 50; blip(330,0.12,0.3);
+        }else{ score += 10; blip(660,0.05,0.15); }
+        scoreEl.textContent = score; remaining--;
+      }
+    }
+    if(remaining===0){
+      state='win'; document.getElementById('msg').textContent='YOU WIN!'; overlay.style.display='flex';
+    }
+
+    // ゴーストAI
+    updateGhostTargets(dt);
+    moveGhosts(dt);
+
+    // 接触判定
+    ghosts.forEach((g,idx)=>{
+      if(distXZ(camera.position, g.position) < 0.95){
+        if(power){
+          let [gx,gz]=ghostSpawnCells[idx];
+          if(!walkable(gx,gz)) [gx,gz]=bfsNearestFree(gx,gz);
+          const p = toWorld(gx,gz);
+          g.position.set(p.x, 0.55, p.z);
+          g.userData.gx=gx; g.userData.gz=gz; g.userData.repath=0;
+          score += 200; scoreEl.textContent=score; blip(180,0.18,0.35);
+        }else{
+          state='gameover'; overlay.style.display='flex'; blip(120,0.4,0.4);
+        }
+      }
+    });
+
+    // パワー時間
+    if(power){
+      powerTime--;
+      ghosts.forEach(g=> g.traverse(n=>{ if(n.material&&n.material.color) n.material.color.set(0x3b73ff); }));
+      if(powerTime<=0){
+        setPower(false);
+        ghosts.forEach(g=> g.traverse(n=>{ if(n.material&&n.material.color) n.material.color.set(g.userData?.baseColor || 0xff4d4d); }));
+      }
+    }
+  }
+
+  // ミニマップ
+  drawMinimap();
+
+  renderer.render(scene, camera);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+/* ========= ミニマップ（パックマン形） ========= */
+const map = document.getElementById('map');
+const ctx = map.getContext('2d');
+function drawMinimap(){
+  const W=200,H=200; ctx.clearRect(0,0,W,H);
+  const scale = W/N;
+
+  // 壁
+  ctx.fillStyle = '#2a5bff';
+  for(let z=0; z<N; z++){
+    for(let x=0; x<N; x++){
+      if(grid[z][x]===1) ctx.fillRect(x*scale, z*scale, scale, scale);
+    }
+  }
+  // エサ
+  ctx.fillStyle = '#ffe84d';
+  dots.forEach(d=>{
+    if(!d) return;
+    const {gx,gz}=toGrid(d.position.x,d.position.z);
+    const r = d.userData.power? scale*0.28 : scale*0.18;
+    ctx.beginPath(); ctx.arc(gx*scale+scale*0.5, gz*scale+scale*0.5, r, 0, Math.PI*2); ctx.fill();
+  });
+  // ゴースト
+  ctx.fillStyle = '#ff4d4d';
+  ghosts.forEach(g=>{
+    const {gx,gz}=toGrid(g.position.x,g.position.z);
+    ctx.fillRect(gx*scale + scale*0.3, gz*scale + scale*0.3, scale*0.4, scale*0.4);
+  });
+  // パックマン（向き= yaw）
+  const p = toGrid(camera.position.x, camera.position.z);
+  const cx = p.gx*scale + scale*0.5, cy = p.gz*scale + scale*0.5;
+  const R = scale*0.35;
+  const ang = Math.atan2(Math.sin(yaw), Math.cos(yaw)); // -π..π
+  const mouth = Math.PI/4; // 口の開き
+  ctx.fillStyle = '#ffeb00';
+  ctx.beginPath();
+  ctx.moveTo(cx,cy);
+  ctx.arc(cx,cy,R, ang+mouth/2, ang+Math.PI*2-mouth/2);
+  ctx.closePath(); ctx.fill();
+  ctx.fillStyle='#000';
+  ctx.beginPath();
+  ctx.arc(cx + Math.cos(ang-Math.PI/2)*R*0.3, cy + Math.sin(ang-Math.PI/2)*R*0.3, R*0.08, 0, Math.PI*2);
+  ctx.fill();
+}
+
+/* ========= リスタートUI ========= */
+restartBtn.addEventListener('click', ()=>location.reload());
+addEventListener('keydown', (e)=>{ if(e.key.toLowerCase()==='r' && state!=='play'){ location.reload(); }});
+
+/* ========= リサイズ ========= */
+addEventListener('resize', ()=>{
+  camera.aspect = innerWidth/innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
